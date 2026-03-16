@@ -2,6 +2,42 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 
+import hmac
+
+# ---------- 密码验证函数 ----------
+def check_password():
+    """返回 `True` 如果用户输入了正确的密码"""
+
+    def password_entered():
+        """检查密码是否正确"""
+        if hmac.compare_digest(st.session_state["password"], st.secrets["PASSWORD"]):
+            st.session_state["password_correct"] = True
+            # 删除已经输入的密码，避免它留在 session_state 中
+            del st.session_state["password"]
+        else:
+            st.session_state["password_correct"] = False
+
+    # 如果已经认证通过，直接返回 True
+    if st.session_state.get("password_correct", False):
+        return True
+
+    # 显示密码输入框
+    st.text_input(
+        "请输入访问密码",
+        type="password",
+        on_change=password_entered,
+        key="password",
+    )
+    if "password_correct" in st.session_state:
+        st.error("😕 密码错误，请重试")
+    return False
+
+# ---------- 应用入口 ----------
+if not check_password():
+    st.stop()  # 密码错误时停止执行后续代码
+
+# ... 你的抽卡概率计算器代码从这里开始 ...
+
 # 设置页面标题
 st.set_page_config(page_title="抽卡概率配表工具", layout="wide")
 st.title("🎲 抽卡概率自动配表工具")
