@@ -5,38 +5,73 @@ import numpy as np
 # 设置页面标题
 st.set_page_config(page_title="抽卡概率配表工具", layout="wide")
 st.title("🎲 抽卡概率自动配表工具")
-st.markdown("根据投入成本、目标总收益、倍数列表以及部分已知概率，计算剩余概率，使总概率和为 1 且总真实收益等于目标值。")
+st.markdown("根据投入成本、目标总收益、可动态编辑的倍数列表以及部分已知概率，计算剩余概率，使总概率和为 1 且总真实收益等于目标值。")
 
-# 侧边栏输入基本参数
+# 初始化 session_state 中的倍数列表
+if 'multipliers' not in st.session_state:
+    # 默认倍数列表
+    st.session_state.multipliers = [0, 0.3, 0.5, 0.7, 1, 1.5, 2, 10, 20, 250]
+
+# 侧边栏基本参数和倍数管理
 with st.sidebar:
     st.header("基本参数")
     cost = st.number_input("投入成本 (美元)", min_value=0.0, value=0.8, step=0.1, format="%.4f")
     total_real_return = st.number_input("总真实收益 (美元)", min_value=0.0, value=0.8, step=0.1, format="%.4f")
     st.caption("总真实收益通常等于投入成本（100%返利），也可设为其他值。")
 
-    st.header("倍数列表")
-    multipliers_input = st.text_input(
-        "输入倍数，用逗号分隔",
-        value="0, 0.3, 0.5, 0.7, 1, 1.5, 2, 10, 20, 250",
-        help="例如：0, 0.3, 0.5, 0.7, 1, 1.5, 2, 10, 20, 250"
-    )
-    # 解析倍数
-    try:
-        multipliers = [float(x.strip()) for x in multipliers_input.split(",") if x.strip() != ""]
-        if len(multipliers) == 0:
-            st.error("至少输入一个倍数")
-            st.stop()
-    except ValueError:
-        st.error("倍数必须为数字，请检查输入格式")
-        st.stop()
+    st.header("倍数列表管理")
+    st.caption("每行一个倍数，可修改、删除或添加新行。")
 
-# 主区域：显示每个倍数的概率输入框
+    # 显示当前倍数列表，每个倍数带删除按钮
+    to_delete = None
+    for i, m in enumerate(st.session_state.multipliers):
+        col1, col2, col3 = st.columns([3, 1, 1])
+        with col1:
+            # 允许编辑倍数
+            new_m = st.number_input(
+                f"倍数 {i+1}",
+                value=float(m),
+                step=0.1,
+                format="%.4f",
+                key=f"mult_{i}",
+                label_visibility="collapsed"
+            )
+            # 如果值改变，更新 session_state
+            if new_m != m:
+                st.session_state.multipliers[i] = new_m
+        with col2:
+            st.write(" ")  # 占位对齐
+        with col3:
+            # 删除按钮，最后一行的删除按钮才有效（避免索引错乱）
+            if i == len(st.session_state.multipliers) - 1:
+                if st.button("🗑️", key=f"del_{i}"):
+                    to_delete = i
+
+    # 处理删除（在循环外执行，避免迭代中修改列表）
+    if to_delete is not None:
+        st.session_state.multipliers.pop(to_delete)
+        st.rerun()
+
+    # 添加倍数按钮
+    if st.button("➕ 添加倍数"):
+        st.session_state.multipliers.append(0.0)  # 默认0
+        st.rerun()
+
+# 主区域：概率输入
 st.header("概率输入")
 st.markdown("在下方输入已知概率（最多四位小数），未知的留空。程序将自动计算剩余概率。")
 
+# 获取当前倍数列表
+multipliers = st.session_state.multipliers
+
+if len(multipliers) == 0:
+    st.warning("请至少添加一个倍数。")
+    st.stop()
+
 # 使用表单防止频繁重算
 with st.form(key="probability_form"):
-    cols = st.columns([1, 1, 2])  # 倍数列、概率输入列、说明列
+    # 表头
+    cols = st.columns([1, 1, 2])
     cols[0].markdown("**倍数**")
     cols[1].markdown("**概率 (已知时填写)**")
     cols[2].markdown("**说明**")
