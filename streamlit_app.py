@@ -2,130 +2,231 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 
-# 页面配置
-st.set_page_config(page_title="抽卡概率表配比工具", layout="wide")
-st.title("🎲 抽卡概率表自动配比工具")
+# 设置页面标题
+st.set_page_config(page_title="抽卡概率配表工具", layout="wide")
+st.title("🎲 抽卡概率自动配表工具")
+st.markdown("根据投入成本、目标总收益、倍数列表以及部分已知概率，计算剩余概率，使总概率和为 1 且总真实收益等于目标值。")
 
-# 初始化 session_state 中的 DataFrame（仅存储倍数和概率）
-if "df" not in st.session_state:
-    # 默认提供几行示例数据（可修改）
-    default_data = {
-        "倍数": [0, 0.3, 0.5, 0.7, 1, 1.5, 2, 10, 20, 250],
-        "概率": [0.15, 0.0915, 0.15, 0.20, 0.20, 0.1085, 0.0849, 0.01, 0.005, 0.0001]
-    }
-    st.session_state.df = pd.DataFrame(default_data)
-
-# 侧边栏输入参数
+# 侧边栏输入基本参数
 with st.sidebar:
-    st.header("⚙️ 全局参数")
-    cost = st.number_input("投入成本 (C)", min_value=0.01, value=0.8, step=0.0001, format="%.4f")
-    total_return = st.number_input("目标总真实收益", min_value=0.0, value=cost, step=0.0001, format="%.4f",
-                                   help="通常等于投入成本（100%返利）")
-    st.caption("当前目标总真实收益 = {:.4f}".format(total_return))
-    st.divider()
-    st.subheader("📊 当前统计")
-    # 占位，实际在下方更新后显示
+    st.header("基本参数")
+    cost = st.number_input("投入成本 (美元)", min_value=0.0, value=0.8, step=0.1, format="%.4f")
+    total_real_return = st.number_input("总真实收益 (美元)", min_value=0.0, value=0.8, step=0.1, format="%.4f")
+    st.caption("总真实收益通常等于投入成本（100%返利），也可设为其他值。")
 
-# 构建显示用的 DataFrame（包含计算列 真实收益）
-display_df = st.session_state.df.copy()
-display_df["真实收益"] = cost * display_df["倍数"] * display_df["概率"]
+    st.header("倍数列表")
+    multipliers_input = st.text_input(
+        "输入倍数，用逗号分隔",
+        value="0, 0.3, 0.5, 0.7, 1, 1.5, 2, 10, 20, 250",
+        help="例如：0, 0.3, 0.5, 0.7, 1, 1.5, 2, 10, 20, 250"
+    )
+    # 解析倍数
+    try:
+        multipliers = [float(x.strip()) for x in multipliers_input.split(",") if x.strip() != ""]
+        if len(multipliers) == 0:
+            st.error("至少输入一个倍数")
+            st.stop()
+    except ValueError:
+        st.error("倍数必须为数字，请检查输入格式")
+        st.stop()
 
-# 显示可编辑表格（倍数和概率可编辑，真实收益只读）
-st.subheader("✏️ 编辑档位数据")
-edited_df = st.data_editor(
-    display_df,
-    column_config={
-        "倍数": st.column_config.NumberColumn("倍数", min_value=0.0, step=0.0001, format="%.4f"),
-        "概率": st.column_config.NumberColumn("概率", min_value=0.0, max_value=1.0, step=0.0001, format="%.4f"),
-        "真实收益": st.column_config.NumberColumn("真实收益", disabled=True, format="%.6f")
-    },
-    num_rows="dynamic",
-    use_container_width=True,
-    key="data_editor"
-)
+# 主区域：显示每个倍数的概率输入框
+st.header("概率输入")
+st.markdown("在下方输入已知概率（最多四位小数），未知的留空。程序将自动计算剩余概率。")
 
-# 检测用户是否编辑了表格（行数或数值变化）
-if not edited_df[["倍数", "概率"]].equals(st.session_state.df[["倍数", "概率"]]):
-    # 更新 session_state 中的原始数据（只保留倍数和概率）
-    st.session_state.df = edited_df[["倍数", "概率"]].copy()
-    st.rerun()  # 立即重新运行以显示更新后的真实收益
+# 使用表单防止频繁重算
+with st.form(key="probability_form"):
+    cols = st.columns([1, 1, 2])  # 倍数列、概率输入列、说明列
+    cols[0].markdown("**倍数**")
+    cols[1].markdown("**概率 (已知时填写)**")
+    cols[2].markdown("**说明**")
 
-# 重新获取最新的 df（确保一致）
-df = st.session_state.df.copy()
+    # 存储每个输入框的值
+    p_inputs = []
+    for i, m in enumerate(multipliers):
+        cols = st.columns([1, 1, 2])
+        cols[0].write(f"{m:.4f}")
+        # 使用文本输入，允许留空
+        p_str = cols[1].text_input(
+            label="",
+            key=f"p_{i}",
+            placeholder="留空表示未知",
+            label_visibility="collapsed"
+        )
+        p_inputs.append(p_str)
+        cols[2].caption(f"期望奖励: {cost * m:.4f} 美元")
 
-# 计算当前总概率和总真实收益
-total_prob = df["概率"].sum()
-total_real = cost * (df["倍数"] * df["概率"]).sum()
+    # 提交按钮
+    submitted = st.form_submit_button("计算")
 
-# 计算剩余概率和剩余真实收益需求
-prob_rem = 1.0 - total_prob
-real_rem = total_return - total_real
+# 处理提交
+if submitted:
+    # 收集已知概率
+    known_probs = {}
+    unknown_indices = []
+    total_p_known = 0.0
+    total_weighted_known = 0.0
+    error_occurred = False
 
-# 在侧边栏更新统计信息
-with st.sidebar:
-    st.metric("当前总概率", f"{total_prob:.6f}", delta=f"{prob_rem:+.6f}" if abs(prob_rem) > 1e-6 else "正好1")
-    st.metric("当前总真实收益", f"{total_real:.6f}", delta=f"{real_rem:+.6f}" if abs(real_rem) > 1e-6 else "正好目标")
-    if prob_rem < -1e-6:
-        st.error(f"❌ 总概率已超过1，超出 {abs(prob_rem):.6f}")
-    elif prob_rem > 1e-6:
-        st.info(f"剩余概率: {prob_rem:.6f}")
-        if abs(real_rem) < 1e-9:
-            st.success("剩余真实收益需求为 0，缺失档位倍率应为 0")
-        elif cost > 0 and prob_rem > 0:
-            m_rem = real_rem / (cost * prob_rem)
-            st.info(f"缺失档位倍率需为: **{m_rem:.6f}**")
-            if m_rem < 0:
-                st.warning("⚠️ 倍率为负，请检查输入是否合理")
-    elif abs(prob_rem) <= 1e-6:
-        if abs(real_rem) > 1e-6:
-            st.error(f"❌ 总概率为1但真实收益偏差 {real_rem:.6f}，无法满足目标")
+    for i, p_str in enumerate(p_inputs):
+        m = multipliers[i]
+        if p_str.strip() == "":
+            unknown_indices.append(i)
         else:
-            st.success("✅ 当前已完美满足条件")
+            try:
+                p = float(p_str)
+                # 检查小数位数（最多4位）
+                if len(p_str.split('.')[-1]) > 4 and '.' in p_str:
+                    st.error(f"倍数 {m} 的概率最多只能有4位小数")
+                    error_occurred = True
+                if p < 0 or p > 1:
+                    st.error(f"倍数 {m} 的概率必须在 0 到 1 之间")
+                    error_occurred = True
+                known_probs[i] = p
+                total_p_known += p
+                total_weighted_known += m * p
+            except ValueError:
+                st.error(f"倍数 {m} 的概率必须为数字")
+                error_occurred = True
 
-# 添加缺失档位的按钮
-col1, col2, col3 = st.columns(3)
-with col1:
-    if st.button("➕ 添加缺失档位"):
-        if prob_rem <= 1e-6:
-            st.warning("没有剩余概率，无法添加缺失档位")
-        elif cost <= 0:
-            st.error("投入成本必须大于0")
+    if error_occurred:
+        st.stop()
+
+    # 检查已知概率和是否 <= 1
+    if total_p_known > 1 + 1e-9:
+        st.error(f"已知概率之和为 {total_p_known:.4f}，超过了 1")
+        st.stop()
+
+    # 目标加权和（sum(m_i * p_i) = total_real_return / cost）
+    target_weighted = total_real_return / cost
+    if total_weighted_known > target_weighted + 1e-9:
+        st.error(f"已知概率的加权和 {total_weighted_known:.4f} 已超过目标加权和 {target_weighted:.4f}")
+        st.stop()
+
+    remaining_p = 1 - total_p_known
+    remaining_weighted = target_weighted - total_weighted_known
+
+    # 根据未知数个数进行求解
+    n_unknown = len(unknown_indices)
+    p_solution = [None] * len(multipliers)  # 最终概率列表
+
+    # 先填入已知概率
+    for i, p in known_probs.items():
+        p_solution[i] = p
+
+    if n_unknown == 0:
+        # 没有未知概率，检查是否满足条件
+        if abs(remaining_p) > 1e-9 or abs(remaining_weighted) > 1e-9:
+            st.error("已知概率的总和或加权和与目标不符，请检查输入")
+            st.stop()
         else:
-            m_rem = real_rem / (cost * prob_rem)
-            # 添加新行（可以允许倍率为负，但给予提示）
-            new_row = pd.DataFrame({"倍数": [m_rem], "概率": [prob_rem]})
-            st.session_state.df = pd.concat([st.session_state.df, new_row], ignore_index=True)
-            st.rerun()
+            st.success("所有概率已知，且满足条件")
 
-with col2:
-    if st.button("🔄 重置为示例数据"):
-        default_data = {
-            "倍数": [0, 0.3, 0.5, 0.7, 1, 1.5, 2, 10, 20, 250],
-            "概率": [0.15, 0.0915, 0.15, 0.20, 0.20, 0.1085, 0.0849, 0.01, 0.005, 0.0001]
-        }
-        st.session_state.df = pd.DataFrame(default_data)
-        st.rerun()
+    elif n_unknown == 1:
+        i = unknown_indices[0]
+        m = multipliers[i]
+        # 两个条件必须同时满足：p_i = remaining_p 且 m * p_i = remaining_weighted
+        if abs(remaining_p * m - remaining_weighted) > 1e-9:
+            st.error("对于单个未知概率，两个约束无法同时满足，请检查已知概率或倍数")
+            st.stop()
+        p = remaining_p
+        if p < 0 or p > 1:
+            st.error(f"计算出的概率 {p:.4f} 超出 [0,1] 范围")
+            st.stop()
+        p_solution[i] = p
 
-with col3:
-    if st.button("🗑️ 清空所有行"):
-        st.session_state.df = pd.DataFrame({"倍数": [0.0], "概率": [0.0]})
-        st.rerun()
+    elif n_unknown == 2:
+        i, j = unknown_indices
+        m_i, m_j = multipliers[i], multipliers[j]
+        # 解线性方程组
+        # p_i + p_j = remaining_p
+        # m_i * p_i + m_j * p_j = remaining_weighted
+        if abs(m_i - m_j) < 1e-9:
+            # 倍数相等，需检查一致性
+            if abs(remaining_p * m_i - remaining_weighted) > 1e-9:
+                st.error("两个倍数相等但加权和与总和约束不一致，无解")
+                st.stop()
+            else:
+                # 任意分配，这里平均分
+                p_i = remaining_p / 2
+                p_j = remaining_p / 2
+                if p_i < 0 or p_i > 1 or p_j < 0 or p_j > 1:
+                    st.error("计算出的概率超出 [0,1] 范围")
+                    st.stop()
+                p_solution[i] = p_i
+                p_solution[j] = p_j
+                st.info("两个倍数相等，采用平均分配")
+        else:
+            # 正常求解
+            A = np.array([[1, 1], [m_i, m_j]])
+            b = np.array([remaining_p, remaining_weighted])
+            try:
+                p_ij = np.linalg.solve(A, b)
+                p_i, p_j = p_ij[0], p_ij[1]
+                if p_i < 0 or p_i > 1 or p_j < 0 or p_j > 1:
+                    st.error(f"计算出的概率超出 [0,1] 范围: p_i={p_i:.4f}, p_j={p_j:.4f}")
+                    st.stop()
+                p_solution[i] = p_i
+                p_solution[j] = p_j
+            except np.linalg.LinAlgError:
+                st.error("求解线性方程组时发生错误，可能是奇异矩阵")
+                st.stop()
 
-# 显示完整的配比表格（包含真实收益）
-st.subheader("📋 当前完整配比表")
-result_df = df.copy()
-result_df["期望奖励"] = cost * result_df["倍数"]
-result_df["真实收益"] = cost * result_df["倍数"] * result_df["概率"]
-result_df["真实收益"] = result_df["真实收益"].round(6)
-st.dataframe(result_df, use_container_width=True)
+    else:  # n_unknown > 2
+        st.error(f"未知概率过多（{n_unknown} 个），目前仅支持最多 2 个未知概率。请指定更多已知概率（至少 {len(multipliers)-2} 个）。")
+        st.stop()
 
-# 底部汇总
-st.divider()
-st.write("💡 使用说明：")
-st.markdown("""
-- **投入成本** 和 **目标总真实收益** 在左侧边栏设置（支持4位小数）。
-- 在表格中编辑各档位的 **倍数** 和 **概率**（均支持4位小数），可动态增删行。
-- 右侧边栏实时显示当前总概率、总真实收益，并自动计算 **缺失档位** 所需的倍数。
-- 点击 **添加缺失档位** 可将计算出的档位加入表格。
-- 当总概率为1且总真实收益等于目标时，表格满足要求。
-""")
+    # 构建完整表格数据
+    table_data = []
+    total_prob = 0.0
+    total_real = 0.0
+    for i, m in enumerate(multipliers):
+        prob = p_solution[i]
+        if prob is None:
+            st.error("内部错误：仍有未填充的概率")
+            st.stop()
+        exp_reward = cost * m
+        real_return = exp_reward * prob
+        table_data.append({
+            "投入成本 (美元)": cost,
+            "倍数": m,
+            "期望奖励 (美元)": round(exp_reward, 4),
+            "获取概率": round(prob, 4),
+            "真实收益 (美元)": round(real_return, 4)
+        })
+        total_prob += prob
+        total_real += real_return
+
+    # 添加汇总行
+    table_data.append({
+        "投入成本 (美元)": "",
+        "倍数": "",
+        "期望奖励 (美元)": "",
+        "获取概率": "总和",
+        "真实收益 (美元)": f"{total_real:.4f}"
+    })
+    table_data.append({
+        "投入成本 (美元)": "",
+        "倍数": "",
+        "期望奖励 (美元)": "",
+        "获取概率": f"{total_prob:.4f}",
+        "真实收益 (美元)": ""
+    })
+
+    df = pd.DataFrame(table_data)
+
+    st.header("计算结果")
+    st.dataframe(df, use_container_width=True)
+
+    # 显示验证信息
+    st.success(f"总概率: {total_prob:.4f} (应为 1)")
+    st.success(f"总真实收益: {total_real:.4f} 美元 (目标: {total_real_return:.4f} 美元)")
+
+    # 可选下载按钮
+    csv = df.to_csv(index=False).encode('utf-8')
+    st.download_button(
+        label="下载表格为 CSV",
+        data=csv,
+        file_name="probability_table.csv",
+        mime="text/csv"
+    )
